@@ -3,23 +3,26 @@ import pandas as pd
 from creds import api_key
 from datetime import datetime, timedelta
 import requests
-from pandas.plotting import register_matplotlib_converters
-
-register_matplotlib_converters()
+import xgboost as xgb
+import matplotlib.pyplot as plt
 
 
 class MinerMeta:
     def __init__(self):
-        self.data = None
-        self.ml_ds = None
+        self.df = None
+        self.train_mean = None
+        self.x_train = None
+        self.y_train = None
+        self.test_predictions = {}
 
     def compile_lc_data(
         self, num_days=180, read_csv=False, write_csv=False, coins="ETH"
     ):
         file = Path.cwd() / "lc_data.csv"
         if read_csv is True:
-            df = pd.read_csv(file, index_col=0)
-            return df
+            self.df = pd.read_csv(file, index_col=0)
+
+            return self.df
         intervals = ["1d", "1w", "1m", "3m", "6m", "1y", "2y"]
         finish = datetime.now()
         start = finish - timedelta(days=num_days)
@@ -37,6 +40,7 @@ class MinerMeta:
             r = requests.get(
                 "https://api.lunarcrush.com/v2?data=assets", params=payload
             )
+            print(r.text)
 
             data = pd.DataFrame.from_dict(r.json()["data"][0])
             ts = data.timeSeries.to_dict()
@@ -59,8 +63,86 @@ class MinerMeta:
         self.df = df
         return self.df
 
-    def ttsplit_norm(self, df, feature_plot=False):
-        import matplotlib.pyplot as plt
+    def ttsplit_norm(self):
+        # train Test Split
+        # n = len(self.df)
+        # self.train = self.df[0 : int(n * 0.7)]
+        # self.val_df = self.df[int(n * 0.7) : int(n * 0.9)]
+        # self.test_df = self.df[int(n * 0.7) :]
+        self.train = self.df.sample(frac=0.8, random_state=0)
+        self.test = self.df.drop(self.train.index)
+        # Normalize the Data
+        self.train_mean = self.train.mean()
+        self.train_std = self.train.std()
+
+        self.x = self.train.loc[:, self.train.columns != "close"]
+        self.y = self.train.close
+
+        self.x_test = self.test.loc[:, self.test.columns != "close"]
+        self.y_test = self.test.close
+
+        # self.train = (train - self.train_mean) / self.train_std
+        # self.val_df = (val_df - self.train_mean) / self.train_std
+        # self.test_df = (test_df - self.train_mean) / self.train_std
+
+        # self.x_train = self.train.copy()
+        # self.y_train = self.x_train.pop("close")
+
+        # self.x_val = self.val_df.copy()
+        # self.y_val = self.x_val.pop("close")
+
+        # self.x_test = self.test_df.copy()
+        # self.y_test = self.x_test.pop("close")
+
+    def build_xgb(self):
+        if self.x_train is None or self.y_train is None:
+            self.ttsplit_norm()
+
+        # dtrain = xgb.DMatrix(self.x_train, label=self.y_train)
+        # dtest = xgb.DMatrix(self.x_test, label=self.y_test)
+        dtrain = xgb.DMatrix(self.x, label=self.y)
+        dtest = xgb.DMatrix(self.x_test, label=self.y_test)
+
+        param = {
+            "max_depth": 100,
+            "eta": 1,
+            "objective": "reg:squarederror",
+            "booster": "gbtree",
+        }
+        evallist = [(dtest, "eval"), (dtrain, "train")]
+
+        num_round = 2
+        self.xg_model = xgb.train(param, dtrain, num_round, evallist)
+
+    def predict_and_plot(self):
+        tmp = self.df.loc[:, self.df.columns != "close"]
+        self.test_predictions["xgb"] = self.xg_model.predict(
+            xgb.DMatrix(tmp, label=self.df.close)
+        )
+
+        plt.figure(figsize=(15, 10))
+        plt.scatter(
+            x=self.df.index,
+            y=self.df.close,
+            color="r",
+            marker=".",
+            label="real data",
+        )
+        plt.scatter(
+            x=self.df.index,
+            y=self.test_predictions["xgb"],
+            marker="X",
+            label="predictions",
+        )
+        plt.xlabel("time")
+        plt.ylabel("price")
+        plt.title("Red is predictions, Blue is real data")
+        plt.show()
+
+    def plot(self):
+        if self.train_mean is None or self.train is None:
+            self.ttsplit_norm()
+        # Creates Feature Plot of main DF keys compared to train mean and train std
         import seaborn as sns
 
         sns.set(
@@ -91,29 +173,9 @@ class MinerMeta:
         sns.set_context(
             "notebook", rc={"font.size": 16, "axes.titlesize": 20, "axes.labelsize": 18}
         )
-
-        # train_df Test Split
-        n = len(df)
-        train_df = df[0 : int(n * 0.7)]
-        val_df = df[int(n * 0.7) : int(n * 0.9)]
-        test_df = df[int(n * 0.9) :]
-        # Normalize the Data
-        train_df_mean = train_df.mean()
-        train_df_std = train_df.std()
-
-        train_df = (train_df - train_df_mean) / train_df_std
-        val_df = (val_df - train_df_mean) / train_df_std
-        test_df = (test_df - train_df_mean) / train_df_std
-
-        # Create Feature Plot if wanted
-        if feature_plot is True:
-            df_std = (df - train_df_mean) / train_df_std
-            df_std = df_std.melt(var_name="Column", value_name="Normalized")
-            plt.figure(figsize=(12, 6))
-            ax = sns.violinplot(x="Column", y="Normalized", data=df_std)
-            ax.set_xticklabels(df.keys(), rotation=90)
-            ax.set_title("Training Data Feature Dist with whole DF Mean")
-
-            return ax
-
-        return train_df, val_df, test_df
+        df_std = (self.df - self.train_mean) / self.train_std
+        df_std = df_std.melt(var_name="Column", value_name="Normalized")
+        plt.figure(figsize=(12, 6))
+        ax = sns.violinplot(x="Column", y="Normalized", data=df_std)
+        ax.set_xticklabels(self.df.keys(), rotation=90)
+        ax.set_title("Training Data Feature Dist with whole DF Mean")
