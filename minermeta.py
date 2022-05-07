@@ -65,12 +65,10 @@ class MinerMeta:
 
     def ttsplit_norm(self):
         # train Test Split
-        # n = len(self.df)
-        # self.train = self.df[0 : int(n * 0.7)]
+        n = len(self.df)
         # self.val_df = self.df[int(n * 0.7) : int(n * 0.9)]
-        # self.test_df = self.df[int(n * 0.7) :]
-        self.train = self.df.sample(frac=0.8, random_state=0)
-        self.test = self.df.drop(self.train.index)
+        self.train = self.df[0 : int(n * 0.7)]
+        self.test = self.df[int(n * 0.7) :]
         # Normalize the Data
         self.train_mean = self.train.mean()
         self.train_std = self.train.std()
@@ -103,16 +101,26 @@ class MinerMeta:
         dtrain = xgb.DMatrix(self.x, label=self.y)
         dtest = xgb.DMatrix(self.x_test, label=self.y_test)
 
+        # param = {
+        #     "max_depth": 100,
+        #     "eta": 1,
+        #     "objective": "reg:squarederror",
+        #     "booster": "gbtree",
+        # }
         param = {
-            "max_depth": 100,
-            "eta": 1,
+            "colsample_bynode": 0.8,
+            "learning_rate": 1,
+            "max_depth": 5,
+            "num_parallel_tree": 100,
             "objective": "reg:squarederror",
-            "booster": "gbtree",
+            "subsample": 0.8,
+            "tree_method": "gpu_hist",
         }
-        evallist = [(dtest, "eval"), (dtrain, "train")]
+        # param["eval_metric"] = ["auc", "ams@0"]
+        # evallist = [(dtest, "eval"), (dtrain, "train")]
 
         num_round = 2
-        self.xg_model = xgb.train(param, dtrain, num_round, evallist)
+        self.xg_model = xgb.train(param, dtrain, num_round)
 
     def predict_and_plot(self):
         tmp = self.df.loc[:, self.df.columns != "close"]
