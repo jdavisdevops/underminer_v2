@@ -21,7 +21,6 @@ class MinerMeta:
         file = Path.cwd() / "lc_data.csv"
         if read_csv is True:
             self.df = pd.read_csv(file, index_col=0)
-
             return self.df
         intervals = ["1d", "1w", "1m", "3m", "6m", "1y", "2y"]
         finish = datetime.now()
@@ -110,21 +109,24 @@ class MinerMeta:
         param = {
             "colsample_bynode": 0.8,
             "learning_rate": 1,
-            "max_depth": 5,
-            "num_parallel_tree": 100,
+            "max_depth": 6,
+            "num_parallel_tree": 110,
             "objective": "reg:squarederror",
             "subsample": 0.8,
             "tree_method": "gpu_hist",
         }
         # param["eval_metric"] = ["auc", "ams@0"]
-        # evallist = [(dtest, "eval"), (dtrain, "train")]
+        evallist = [(dtest, "eval"), (dtrain, "train")]
 
         num_round = 2
-        self.xg_model = xgb.train(param, dtrain, num_round)
+        self.xg_model = xgb.train(param, dtrain, num_round, evallist)
 
     def predict_and_plot(self):
         tmp = self.df.loc[:, self.df.columns != "close"]
-        self.test_predictions["xgb"] = self.xg_model.predict(
+        dt_index = self.df.index
+        # self.test_predictions["xgb"] = self.xg_model.predict(
+        #     xgb.DMatrix(tmp, label=self.df.close))
+        self.df["predictions"] = self.xg_model.predict(
             xgb.DMatrix(tmp, label=self.df.close)
         )
 
@@ -138,7 +140,7 @@ class MinerMeta:
         )
         plt.scatter(
             x=self.df.index,
-            y=self.test_predictions["xgb"],
+            y=self.df.predictions,
             marker="X",
             label="predictions",
         )
@@ -182,7 +184,7 @@ class MinerMeta:
             "notebook", rc={"font.size": 16, "axes.titlesize": 20, "axes.labelsize": 18}
         )
         df_std = (self.df - self.train_mean) / self.train_std
-        df_std = df_std.melt(var_name="Column", value_name="Normalized")
+        df_std = df_std.melt(var_name="Columns", value_name="Normalized")
         plt.figure(figsize=(12, 6))
         ax = sns.violinplot(x="Column", y="Normalized", data=df_std)
         ax.set_xticklabels(self.df.keys(), rotation=90)
