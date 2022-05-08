@@ -13,7 +13,8 @@ class MinerMeta:
         self.train_mean = None
         self.x_train = None
         self.y_train = None
-        self.test_predictions = {}
+        # self.test_predictions = {}
+        self.pred_df = None
 
     def compile_lc_data(
         self, num_days=180, read_csv=False, write_csv=False, coins="ETH"
@@ -121,35 +122,36 @@ class MinerMeta:
         num_round = 2
         self.xg_model = xgb.train(param, dtrain, num_round, evallist)
 
-    def predict_and_plot(self):
-        tmp = self.df.loc[:, self.df.columns != "close"]
-        dt_index = self.df.index
+    def predict_and_plot(self, plot=True):
+        df_features = self.df.loc[:, self.df.columns != "close"]
         # self.test_predictions["xgb"] = self.xg_model.predict(
         #     xgb.DMatrix(tmp, label=self.df.close))
         self.df["predictions"] = self.xg_model.predict(
-            xgb.DMatrix(tmp, label=self.df.close)
+            xgb.DMatrix(df_features, label=self.df.close)
         )
+        self.pred_df = self.df.copy()
+        if not plot:
 
-        plt.figure(figsize=(15, 10))
-        plt.scatter(
-            x=self.df.index,
-            y=self.df.close,
-            color="r",
-            marker=".",
-            label="real data",
-        )
-        plt.scatter(
-            x=self.df.index,
-            y=self.df.predictions,
-            marker="X",
-            label="predictions",
-        )
-        plt.xlabel("time")
-        plt.ylabel("price")
-        plt.title("Red is predictions, Blue is real data")
-        plt.show()
+            plt.figure(figsize=(15, 10))
+            plt.scatter(
+                x=self.df.index,
+                y=self.df.close,
+                color="r",
+                marker=".",
+                label="real data",
+            )
+            plt.scatter(
+                x=self.df.index,
+                y=self.df.predictions,
+                marker="X",
+                label="predictions",
+            )
+            plt.xlabel("time")
+            plt.ylabel("price")
+            plt.title("Red is predictions, Blue is real data")
+            plt.show()
 
-    def plot(self):
+    def plot_feature_dist(self):
         if self.train_mean is None or self.train is None:
             self.ttsplit_norm()
         # Creates Feature Plot of main DF keys compared to train mean and train std
@@ -186,6 +188,15 @@ class MinerMeta:
         df_std = (self.df - self.train_mean) / self.train_std
         df_std = df_std.melt(var_name="Columns", value_name="Normalized")
         plt.figure(figsize=(12, 6))
-        ax = sns.violinplot(x="Column", y="Normalized", data=df_std)
+        ax = sns.violinplot(x="Columns", y="Normalized", data=df_std)
         ax.set_xticklabels(self.df.keys(), rotation=90)
         ax.set_title("Training Data Feature Dist with whole DF Mean")
+
+    def plot_day(self, num_days: int):
+        if self.pred_df is None:
+            self.predict_and_plot(plot=False)
+        tmp = self.pred_df.copy()
+        tmp.index = pd.to_datetime(tmp.index)
+        start = tmp.index.max() - timedelta(days=num_days)
+        tmp = tmp[tmp.index >= start]
+        return tmp.plot(y=["predictions", "close"], use_index=True)
